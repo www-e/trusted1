@@ -8,7 +8,7 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: false, // Set to true when you implement email verification
+    requireEmailVerification: false,
   },
   user: {
     additionalFields: {
@@ -26,7 +26,7 @@ export const auth = betterAuth({
         type: 'string',
         required: false,
         defaultValue: 'user',
-        input: false, // Users cannot set their own role
+        input: false,
       },
       phoneNumber: {
         type: 'string',
@@ -58,7 +58,8 @@ export const auth = betterAuth({
   trustedOrigins: [
     'http://localhost:3000',
     'http://localhost:3001',
-    process.env.NEXT_PUBLIC_APP_URL || '',
+    'https://trusted-gamma.vercel.app',
+    ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
   ],
 });
 
