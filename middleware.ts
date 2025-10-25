@@ -4,6 +4,13 @@ import type { NextRequest } from "next/server";
 const allowedOrigins = process.env.ALLOWED_ORIGIN?.split(",") || [];
 
 export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Skip CORS handling for Better Auth routes as it handles CORS internally
+  if (pathname.startsWith("/api/auth")) {
+    return NextResponse.next();
+  }
+
   const origin = request.headers.get("origin");
   const isAllowedOrigin = origin && allowedOrigins.includes(origin);
 
@@ -37,6 +44,8 @@ export function middleware(request: NextRequest) {
 }
 
 // Configure which routes use this middleware
+// Exclude Better Auth routes as it handles CORS internally
 export const config = {
   matcher: "/api/:path*",
+  runtime: "nodejs",
 };
