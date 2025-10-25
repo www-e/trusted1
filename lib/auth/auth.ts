@@ -4,66 +4,20 @@ import { emailOTP, username } from "better-auth/plugins";
 import prisma from "@/lib/prisma/client";
 import { sendOTPEmail } from "@/lib/services/email.service";
 
-/**
- * Get trusted origins for Better Auth
- * Note: We also handle CORS explicitly in route handlers
- * for better compatibility (see app/api/auth/[...all]/route.ts)
- */
-function getTrustedOrigins(): string[] {
-  const isDevelopment = process.env.NODE_ENV === "development";
-  const origins: string[] = [];
-  
-  if (isDevelopment) {
-    origins.push(
-      "http://localhost:3000",
-      "http://localhost",      // Better Auth handles port wildcards
-      "http://127.0.0.1"
-    );
-  } else {
-    origins.push(
-      "https://trusted-gamma.vercel.app",
-      process.env.NEXT_PUBLIC_APP_URL || "https://trusted-gamma.vercel.app"
-    );
-    
-    // Vercel preview deployments
-    if (process.env.VERCEL_URL) {
-      origins.push(`https://${process.env.VERCEL_URL}`);
-    }
-    
-    // Wildcard for all Vercel previews
-    origins.push("https://*.vercel.app");
-  }
-  
-  return origins;
-}
-
-/**
- * Get base URL for Better Auth
- */
-function getBaseURL(): string {
-  if (process.env.BETTER_AUTH_URL) {
-    return process.env.BETTER_AUTH_URL;
-  }
-  
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL;
-  }
-  
-  return "http://localhost:3000";
-}
-
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
   
-  baseURL: getBaseURL(),
+  // IMPORTANT: Keep these simple, route handler handles CORS
+  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   secret: process.env.BETTER_AUTH_SECRET,
-  trustedOrigins: getTrustedOrigins(),
+  
+  // Even though trustedOrigins doesn't fully work due to bug,
+  // we still set it for future compatibility
+  trustedOrigins: process.env.NODE_ENV === "development"
+    ? ["http://localhost", "http://127.0.0.1"]
+    : ["https://trusted-gamma.vercel.app"],
   
   emailAndPassword: {
     enabled: true,
@@ -73,7 +27,7 @@ export const auth = betterAuth({
   },
   
   session: {
-    expiresIn: 60 * 60 * 24 * 7, // 7 days
+    expiresIn: 60 * 60 * 24 * 7,
     updateAge: 60 * 60 * 24,
     cookieCache: {
       enabled: true,
@@ -84,18 +38,6 @@ export const auth = betterAuth({
   advanced: {
     cookiePrefix: "better-auth",
     useSecureCookies: process.env.NODE_ENV === "production",
-    defaultCookieAttributes: {
-      sameSite: "lax",
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-    },
-  },
-  
-  rateLimit: {
-    enabled: process.env.NODE_ENV === "production",
-    window: 60,
-    max: 100,
-    storage: "memory",
   },
   
   plugins: [
