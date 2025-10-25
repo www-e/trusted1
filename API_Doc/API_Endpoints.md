@@ -1,62 +1,130 @@
+## 📱 Flutter Integration
+
+### Dependencies (pubspec.yaml)
+```yaml
+dependencies:
+  flutter_dotenv: ^5.0.2
+  better_auth_flutter: ^0.0.1  # For Better-Auth integration
+  trpc_client_flutter: ^0.0.1  # If using tRPC
+```
+
+### Environment Setup (lib/env.dart)
+```dart
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+class Env {
+  static Future<void> init() async {
+    await dotenv.load(fileName: ".env");
+  }
+
+  static String get apiBaseUrl => dotenv.env['API_BASE_URL'] ?? 'https://trusted-gamma.vercel.app/api/trpc';
+  static String get betterAuthUrl => dotenv.env['BETTER_AUTH_URL'] ?? 'https://trusted-gamma.vercel.app/api/auth';
+  static int get apiTimeoutSeconds => int.parse(dotenv.env['API_TIMEOUT_SECONDS'] ?? '10');
+  static int get apiMaxRetries => int.parse(dotenv.env['API_MAX_RETRIES'] ?? '2');
+  static String get environment => dotenv.env['ENVIRONMENT'] ?? 'development';
+  static bool get useCertificatePinning => dotenv.env['USE_CERTIFICATE_PINNING'] == 'true';
+}
+```
+
+### Auth Service (lib/services/auth_service.dart)
+```dart
+import 'package:better_auth_flutter/better_auth_flutter.dart';
+import 'env.dart';
+
+class AuthService {
+  late BetterAuthClient _client;
+
+  AuthService() {
+    _client = BetterAuthClient(baseURL: Env.betterAuthUrl);
+  }
+
+  Future<SignUpResponse> signUp({
+    required String email,
+    required String password,
+    String? name,
+    String? username,
+  }) async {
+    return await _client.signUp.email({
+      email: email,
+      password: password,
+      name: name,
+      username: username,
+    });
+  }
+
+  Future<SignInResponse> signIn({
+    required String username,
+    required String password,
+  }) async {
+    return await _client.signIn.email({
+      username: username,
+      password: password,
+    });
+  }
+
+  Future<void> sendOTP(String email) async {
+    await _client.sendVerificationOTP(email: email);
+  }
+
+  Future<void> verifyOTP(String email, String otp) async {
+    await _client.verifyOTP(email: email, otp: otp);
+  }
+
+  Future<Session?> getSession() async {
+    return await _client.getSession();
+  }
+
+  Future<void> signOut() async {
+    await _client.signOut();
+  }
+}
+```
+
 ## 📡 API Endpoints
 
-### 1. Sign Up
+### Authentication (Better-Auth)
 
-**Endpoint:** `POST /api/trpc/auth.signUp`
+**Note:** Authentication is now handled by Better-Auth for better mobile integration. Use the Better-Auth client in Flutter for seamless auth.
 
-**Description:** Creates a new user account with username, email, password, and optional profile information.
+#### 1. Sign Up
+
+**Endpoint:** `POST /api/auth/sign-up`
+
+**Description:** Creates a new user account with email, password, and optional profile information. Uses Better-Auth with email OTP verification.
 
 **Request Body:**
 
 {
-"username": "johndoe",
 "email": "john@example.com",
 "password": "SecurePass123!",
 "name": "John Doe",
-"phoneNumber": "+1234567890",
-"secondPhone": "+0987654321",
-"deviceId": "flutter-device-uuid"
+"username": "johndoe"
 }
 
 **Required Fields:**
-- `username` (string, 3-20 chars, alphanumeric + underscore)
 - `email` (string, valid email format)
 - `password` (string, min 8 chars)
 
 **Optional Fields:**
 - `name` (string)
-- `phoneNumber` (string)
-- `secondPhone` (string)
-- `deviceId` (string, recommended for multi-device management)
+- `username` (string)
 
 **Response (200 OK):**
 
 {
-"result": {
-"data": {
-"success": true,
-"message": "Account created successfully! Please verify your email.",
 "user": {
 "id": "clxyz123abc",
-"username": "johndoe",
 "email": "john@example.com",
 "emailVerified": false,
 "name": "John Doe",
-"role": "user",
-"phoneNumber": "+1234567890",
-"secondPhone": "+0987654321",
-"deviceId": "flutter-device-uuid",
+"username": "johndoe",
 "createdAt": "2025-10-22T18:00:00.000Z",
 "updatedAt": "2025-10-22T18:00:00.000Z"
 },
 "session": {
 "id": "session123",
 "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-"expiresAt": "2025-10-29T18:00:00.000Z",
-"ipAddress": null,
-"userAgent": null
-}
-}
+"expiresAt": "2025-10-29T18:00:00.000Z"
 }
 }
 
@@ -80,57 +148,39 @@
 
 ---
 
-### 2. Sign In
+#### 2. Sign In
 
-**Endpoint:** `POST /api/trpc/auth.signIn`
+**Endpoint:** `POST /api/auth/sign-in`
 
-**Description:** Authenticates user with username and password.
+**Description:** Authenticates user with username/email and password.
 
 **Request Body:**
 
 {
 "username": "johndoe",
-"password": "SecurePass123!",
-"deviceId": "flutter-device-uuid"
+"password": "SecurePass123!"
 }
 
 **Required Fields:**
-- `username` (string)
+- `username` (string) or `email` (string)
 - `password` (string)
-
-**Optional Fields:**
-- `deviceId` (string)
 
 **Response (200 OK):**
 
 {
-"result": {
-"data": {
-"success": true,
-"message": "Signed in successfully",
-"session": {
 "user": {
 "id": "clxyz123abc",
 "username": "johndoe",
 "email": "john@example.com",
 "emailVerified": true,
 "name": "John Doe",
-"role": "user",
-"phoneNumber": "+1234567890",
-"secondPhone": "+0987654321",
-"deviceId": "flutter-device-uuid",
 "createdAt": "2025-10-22T18:00:00.000Z",
 "updatedAt": "2025-10-22T18:00:00.000Z"
 },
 "session": {
 "id": "session123",
 "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-"expiresAt": "2025-10-29T18:00:00.000Z",
-"ipAddress": null,
-"userAgent": null
-}
-}
-}
+"expiresAt": "2025-10-29T18:00:00.000Z"
 }
 }
 
@@ -147,7 +197,7 @@
 
 ### 3. Send Email Verification OTP
 
-**Endpoint:** `POST /api/trpc/auth.sendEmailVerificationOTP`
+**Endpoint:** `POST /api/auth/send-verification-otp`
 
 **Description:** Sends a 6-digit OTP code to the user's email for verification.
 
@@ -163,14 +213,10 @@
 **Response (200 OK):**
 
 {
-"result": {
-"data": {
 "success": true,
 "message": "Verification code sent to your email",
 "email": "john@example.com",
 "expiresIn": 300
-}
-}
 }
 
 **Notes:**
@@ -200,11 +246,9 @@
 
 ### 4. Verify Email OTP
 
-**Endpoint:** `POST /api/trpc/auth.verifyEmailOTP`
+**Endpoint:** `POST /api/auth/verify-otp`
 
 **Description:** Verifies the email using the OTP code sent to user's email.
-
-**Note:** If the email is already verified, the endpoint returns success without requiring OTP verification.
 
 **Request Body:**
 
@@ -220,13 +264,9 @@
 **Response (200 OK):**
 
 {
-"result": {
-"data": {
 "success": true,
 "message": "Email verified successfully",
 "emailVerified": true
-}
-}
 }
 
 **Error Response (400 Bad Request):**
@@ -251,42 +291,28 @@
 
 ### 5. Get Current User (Protected)
 
-**Endpoint:** `GET /api/trpc/auth.getMe`
+**Endpoint:** `GET /api/auth/session`
 
 **Description:** Retrieves the current authenticated user's profile and session data.
 
-**Authentication:** Required (Bearer Token)
-
-**Headers:**
-
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+**Authentication:** Handled by Better-Auth (cookies or headers)
 
 **Response (200 OK):**
 
 {
-"result": {
-"data": {
 "user": {
 "id": "clxyz123abc",
 "username": "johndoe",
 "email": "john@example.com",
 "emailVerified": true,
 "name": "John Doe",
-"role": "user",
-"phoneNumber": "+1234567890",
-"secondPhone": "+0987654321",
-"deviceId": "flutter-device-uuid",
 "createdAt": "2025-10-22T18:00:00.000Z",
 "updatedAt": "2025-10-22T18:00:00.000Z"
 },
 "session": {
 "id": "session123",
 "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-"expiresAt": "2025-10-29T18:00:00.000Z",
-"ipAddress": "192.168.1.1",
-"userAgent": "Flutter/3.0"
-}
-}
+"expiresAt": "2025-10-29T18:00:00.000Z"
 }
 }
 
@@ -301,7 +327,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ---
 
-### 6. Update Profile (Protected)
+### 7. Update Profile (Protected)
 
 **Endpoint:** `POST /api/trpc/auth.updateProfile`
 
@@ -348,29 +374,19 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ---
 
-### 7. Sign Out (Protected)
+### 6. Sign Out (Protected)
 
-**Endpoint:** `POST /api/trpc/auth.signOut`
+**Endpoint:** `POST /api/auth/sign-out`
 
 **Description:** Invalidates the current session and logs out the user.
 
-**Authentication:** Required (Bearer Token)
-
-**Request Body:**
-
-{
-"sessionToken": "optional-token-if-not-in-header"
-}
+**Authentication:** Handled by Better-Auth
 
 **Response (200 OK):**
 
 {
-"result": {
-"data": {
 "success": true,
 "message": "Signed out successfully"
-}
-}
 }
 
 ---

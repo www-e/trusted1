@@ -1,9 +1,6 @@
 import { router, publicProcedure, protectedProcedure } from "@/lib/trpc/trpc";
 import { TRPCError } from "@trpc/server";
 import prisma from "@/lib/prisma/client";
-import { hash, verify } from "@node-rs/argon2";
-import { generateId } from "better-auth";
-import { sendOTPEmail } from "@/lib/services/email.service";
 import {
   signUpSchema,
   signInSchema,
@@ -19,11 +16,6 @@ import {
   type UpdateProfileResponse,
   type UserResponse,
 } from "@/lib/types/auth.types";
-
-// Helper: Generate OTP
-function generateOTP(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
 
 // Helper: Map Prisma User to UserResponse
 function mapUserToResponse(user: {
@@ -60,64 +52,37 @@ export const authRouter = router({
     .input(signUpSchema)
     .mutation(async ({ input }): Promise<SignUpResponse> => {
       try {
-        // Check if username exists
-        const existingUsername = await prisma.user.findUnique({
-          where: { username: input.username },
-        });
-
-        if (existingUsername) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Username already exists",
-          });
-        }
-
-        // Check if email exists
-        const existingEmail = await prisma.user.findUnique({
-          where: { email: input.email },
-        });
-
-        if (existingEmail) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Email already exists",
-          });
-        }
-
-        // Hash password
-        const hashedPassword = await hash(input.password, {
-          memoryCost: 19456,
-          timeCost: 2,
-          outputLen: 32,
-          parallelism: 1,
-        });
-
-        // Create user
-        const user = await prisma.user.create({
-          data: {
-            id: generateId(),
-            username: input.username,
-            email: input.email,
-            password: hashedPassword,
-            name: input.name || null,
-            phoneNumber: input.phoneNumber || null,
-            secondPhone: input.secondPhone || null,
-            deviceId: input.deviceId || null,
-            emailVerified: false,
-            role: "user",
+        // Call Better-Auth signUp route
+        const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/sign-up`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            email: input.email,
+            password: input.password,
+            name: input.name,
+            username: input.username,
+          }),
         });
 
-        // Create session
-        const sessionToken = generateId(32);
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+        const result = await response.json();
 
-        const session = await prisma.session.create({
+        if (!response.ok || !result.user) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: result.error?.message || "Failed to create account",
+          });
+        }
+
+        // Update user with additional fields
+        const user = await prisma.user.update({
+          where: { id: result.user.id },
           data: {
-            id: generateId(),
-            token: sessionToken,
-            userId: user.id,
-            expiresAt,
+            phoneNumber: input.phoneNumber,
+            secondPhone: input.secondPhone,
+            deviceId: input.deviceId,
+            role: "user",
           },
         });
 
@@ -126,11 +91,11 @@ export const authRouter = router({
           message: "Account created successfully! Please verify your email.",
           user: mapUserToResponse(user),
           session: {
-            id: session.id,
-            token: session.token,
-            expiresAt: session.expiresAt,
-            ipAddress: session.ipAddress,
-            userAgent: session.userAgent,
+            id: result.session?.id || "",
+            token: result.session?.token || "",
+            expiresAt: result.session?.expiresAt || new Date(),
+            ipAddress: null,
+            userAgent: null,
           },
         };
       } catch (error) {
@@ -151,64 +116,51 @@ export const authRouter = router({
     .input(signInSchema)
     .mutation(async ({ input }): Promise<SignInResponse> => {
       try {
-        // Find user by username
-        const user = await prisma.user.findUnique({
-          where: { username: input.username },
+        // Call Better-Auth signIn route
+        const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/sign-in`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username: input.username,
+            password: input.password,
+          }),
         });
 
-        if (!user) {
+        const result = await response.json();
+
+        if (!response.ok || !result.user) {
           throw new TRPCError({
             code: "UNAUTHORIZED",
-            message: "Invalid username or password",
-          });
-        }
-
-        // Verify password
-        const isValidPassword = await verify(user.password, input.password);
-
-        if (!isValidPassword) {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "Invalid username or password",
+            message: result.error?.message || "Invalid username or password",
           });
         }
 
         // Update deviceId if provided
-        if (input.deviceId && input.deviceId !== user.deviceId) {
+        if (input.deviceId) {
           await prisma.user.update({
-            where: { id: user.id },
+            where: { id: result.user.id },
             data: { deviceId: input.deviceId },
           });
         }
 
-        // Create session
-        const sessionToken = generateId(32);
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-
-        const session = await prisma.session.create({
-          data: {
-            id: generateId(),
-            token: sessionToken,
-            userId: user.id,
-            expiresAt,
-          },
+        // Fetch updated user
+        const updatedUser = await prisma.user.findUnique({
+          where: { id: result.user.id },
         });
-
-        const updatedUser = input.deviceId && input.deviceId !== user.deviceId
-          ? { ...user, deviceId: input.deviceId }
-          : user;
 
         return {
           success: true,
           message: "Signed in successfully",
           session: {
-            user: mapUserToResponse(updatedUser),
+            user: mapUserToResponse(updatedUser!),
             session: {
-              id: session.id,
-              token: session.token,
-              expiresAt: session.expiresAt,
-              ipAddress: session.ipAddress,
-              userAgent: session.userAgent,
+              id: result.session?.id || "",
+              token: result.session?.token || "",
+              expiresAt: result.session?.expiresAt || new Date(),
+              ipAddress: null,
+              userAgent: null,
             },
           },
         };
@@ -230,53 +182,25 @@ export const authRouter = router({
     .input(sendEmailVerificationOTPSchema)
     .mutation(async ({ input }): Promise<SendOTPResponse> => {
       try {
-        // Check if user exists
-        const user = await prisma.user.findUnique({
-          where: { email: input.email },
+        // Call Better-Auth send verification OTP route
+        const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/send-verification-otp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: input.email,
+          }),
         });
 
-        if (!user) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "No account found with this email",
-          });
-        }
+        const result = await response.json();
 
-        if (user.emailVerified) {
+        if (!response.ok) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Email is already verified",
+            message: result.error?.message || "Failed to send verification code",
           });
         }
-
-        // Generate OTP
-        const otp = generateOTP();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-        // Hash OTP
-        const hashedOTP = await hash(otp, {
-          memoryCost: 19456,
-          timeCost: 2,
-          outputLen: 32,
-          parallelism: 1,
-        });
-
-        // Store in verification table
-        await prisma.verification.create({
-          data: {
-            id: generateId(),
-            identifier: input.email,
-            value: hashedOTP,
-            expiresAt,
-          },
-        });
-
-        // Send email
-        await sendOTPEmail({
-          to: input.email,
-          otp,
-          type: "email-verification",
-        });
 
         return {
           success: true,
@@ -302,62 +226,26 @@ export const authRouter = router({
     .input(verifyEmailOTPSchema)
     .mutation(async ({ input }): Promise<VerifyOTPResponse> => {
       try {
-        // Find user
-        const user = await prisma.user.findUnique({
-          where: { email: input.email },
-        });
-
-        if (!user) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "No account found with this email",
-          });
-        }
-
-        if (user.emailVerified) {
-          return {
-            success: true,
-            message: "Email is already verified",
-            emailVerified: true,
-          };
-        }
-
-        // Find verification record
-        const verification = await prisma.verification.findFirst({
-          where: {
-            identifier: input.email,
-            expiresAt: { gte: new Date() },
+        // Call Better-Auth verify OTP route
+        const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/verify-otp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-          orderBy: { createdAt: "desc" },
+          body: JSON.stringify({
+            email: input.email,
+            otp: input.otp,
+          }),
         });
 
-        if (!verification) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Invalid or expired verification code",
-          });
-        }
+        const result = await response.json();
 
-        // Verify OTP
-        const isValidOTP = await verify(verification.value, input.otp);
-
-        if (!isValidOTP) {
+        if (!response.ok) {
           throw new TRPCError({
             code: "UNAUTHORIZED",
-            message: "Invalid verification code",
+            message: result.error?.message || "Invalid verification code",
           });
         }
-
-        // Update user email verified status
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { emailVerified: true },
-        });
-
-        // Delete verification record
-        await prisma.verification.delete({
-          where: { id: verification.id },
-        });
 
         return {
           success: true,
@@ -435,8 +323,12 @@ export const authRouter = router({
     .input(signOutSchema)
     .mutation(async ({ ctx }): Promise<{ success: boolean; message: string }> => {
       try {
-        await prisma.session.delete({
-          where: { id: ctx.session.id },
+        // Call Better-Auth signOut route
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/sign-out`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
         });
 
         return {

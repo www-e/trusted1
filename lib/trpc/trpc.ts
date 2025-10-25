@@ -1,5 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
+import { auth } from "@/lib/auth/auth";
 import prisma from "@/lib/prisma/client";
 
 // Context type that will be available in all procedures
@@ -26,11 +27,12 @@ export interface Context {
 export async function createContext(opts: {
   headers: Headers;
 }): Promise<Context> {
-  // Extract token from Authorization header
-  const authHeader = opts.headers.get("authorization");
-  const token = authHeader?.replace("Bearer ", "");
+  // Use Better-Auth to get session
+  const session = await auth.api.getSession({
+    headers: opts.headers,
+  });
 
-  if (!token) {
+  if (!session) {
     return {
       session: null,
       user: null,
@@ -38,13 +40,12 @@ export async function createContext(opts: {
     };
   }
 
-  // Find session in database
-  const session = await prisma.session.findUnique({
-    where: { token },
-    include: { user: true },
+  // Fetch full user from Prisma
+  const dbUser = await prisma.user.findUnique({
+    where: { id: session.user.id },
   });
 
-  if (!session || session.expiresAt < new Date()) {
+  if (!dbUser) {
     return {
       session: null,
       user: null,
@@ -54,19 +55,19 @@ export async function createContext(opts: {
 
   return {
     session: {
-      id: session.id,
-      token: session.token,
-      expiresAt: session.expiresAt,
-      ipAddress: session.ipAddress,
-      userAgent: session.userAgent,
-      userId: session.userId,
+      id: session.session.id,
+      token: session.session.token,
+      expiresAt: new Date(session.session.expiresAt),
+      ipAddress: session.session.ipAddress || null,
+      userAgent: session.session.userAgent || null,
+      userId: session.user.id,
     },
     user: {
-      id: session.user.id,
-      username: session.user.username,
-      email: session.user.email,
-      emailVerified: session.user.emailVerified,
-      role: session.user.role,
+      id: dbUser.id,
+      username: dbUser.username,
+      email: dbUser.email,
+      emailVerified: dbUser.emailVerified,
+      role: dbUser.role,
     },
     headers: opts.headers,
   };

@@ -22,14 +22,18 @@ export const trpcClient = createTRPCClient<AppRouter>({
     httpBatchLink({
       url: `${getBaseUrl()}/api/trpc`,
       transformer: superjson,
-      
+
       // Pass authentication headers
       headers: async () => {
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
-        
-        // You can add additional headers here
+
+        // Add cookie for Better-Auth session
+        if (typeof window !== "undefined") {
+          headers["cookie"] = document.cookie;
+        }
+
         return headers;
       },
     }),
