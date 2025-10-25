@@ -34,10 +34,7 @@ export const auth = betterAuth({
   },
 
   trustedOrigins: [
-    process.env.NEXT_PUBLIC_APP_URL!,
-    "http://localhost:3000",
-    // Add wildcard for dynamic Flutter dev ports in development
-    ...(process.env.NODE_ENV !== "production" ? ["http://localhost:*"] : []),
+    ...(process.env.ALLOWED_ORIGIN?.split(",") || []),
   ],
 
   plugins: [

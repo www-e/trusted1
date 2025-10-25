@@ -1,51 +1,48 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const allowedOrigins = process.env.ALLOWED_ORIGIN?.split(",") || [];
+// This middleware now ONLY handles CORS for tRPC routes.
+// Better-Auth handles CORS for its own /api/auth routes internally.
 
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  // Skip CORS handling for Better Auth routes as it handles CORS internally
-  if (pathname.startsWith("/api/auth")) {
-    return NextResponse.next();
-  }
-
-  const origin = request.headers.get("origin");
-  const isAllowedOrigin = origin && allowedOrigins.includes(origin);
-
-  // In development, allow all origins to avoid dynamic port issues
+  const origin = request.headers.get("origin") ?? "";
   const isDevelopment = process.env.NODE_ENV !== "production";
 
-  // Handle CORS preflight requests
+  // In development, we can be more permissive to support dynamic ports.
+  // In production, we should strictly check against a list of allowed origins.
+  // Note: Your ALLOWED_ORIGIN env var should be a comma-separated list.
+  const allowedOrigins = (process.env.ALLOWED_ORIGIN || "").split(",");
+  const isAllowedOrigin = allowedOrigins.includes(origin) || (isDevelopment && origin.startsWith("http://localhost:"));
+
+  // Handle preflight requests (OPTIONS)
   if (request.method === "OPTIONS") {
-    if (isAllowedOrigin || isDevelopment) {
+    if (isAllowedOrigin) {
       return new NextResponse(null, {
-        status: 200,
+        status: 204, // No Content
         headers: {
-          "Access-Control-Allow-Origin": isDevelopment ? "*" : (origin || "*"),
+          "Access-Control-Allow-Origin": origin,
           "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Cookie",
-          "Access-Control-Allow-Credentials": isDevelopment ? "false" : "true", // Credentials false when using *
-          "Access-Control-Max-Age": "86400",
+          "Access-Control-Allow-Credentials": "true",
+          "Access-Control-Max-Age": "86400", // 24 hours
         },
       });
     }
-    return new NextResponse(null, { status: 403 });
+    // If the origin is not allowed, deny the preflight request.
+    return new NextResponse("CORS policy violation", { status: 403 });
   }
 
-  // For other requests, set CORS headers
+  // For actual requests, attach the CORS headers to the response.
   const response = NextResponse.next();
-  if (isAllowedOrigin || isDevelopment) {
-    response.headers.set("Access-Control-Allow-Origin", isDevelopment ? "*" : (origin || "*"));
-    response.headers.set("Access-Control-Allow-Credentials", isDevelopment ? "false" : "true");
+  if (isAllowedOrigin) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+    response.headers.set("Access-Control-Allow-Credentials", "true");
   }
+
   return response;
 }
 
-// Configure which routes use this middleware
-// Exclude Better Auth routes as it handles CORS internally
+// This config ensures the middleware only runs on tRPC routes.
 export const config = {
-  matcher: "/api/:path*",
-  runtime: "nodejs",
+  matcher: "/api/trpc/:path*",
 };
