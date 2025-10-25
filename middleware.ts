@@ -7,16 +7,19 @@ export function middleware(request: NextRequest) {
   const origin = request.headers.get("origin");
   const isAllowedOrigin = origin && allowedOrigins.includes(origin);
 
+  // In development, allow all origins to avoid dynamic port issues
+  const isDevelopment = process.env.NODE_ENV !== "production";
+
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
-    if (isAllowedOrigin || process.env.NODE_ENV !== "production") {
+    if (isAllowedOrigin || isDevelopment) {
       return new NextResponse(null, {
         status: 200,
         headers: {
-          "Access-Control-Allow-Origin": origin || "*",
+          "Access-Control-Allow-Origin": isDevelopment ? "*" : (origin || "*"),
           "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Cookie",
-          "Access-Control-Allow-Credentials": "true",
+          "Access-Control-Allow-Credentials": isDevelopment ? "false" : "true", // Credentials false when using *
           "Access-Control-Max-Age": "86400",
         },
       });
@@ -24,11 +27,11 @@ export function middleware(request: NextRequest) {
     return new NextResponse(null, { status: 403 });
   }
 
-  // For other requests, set CORS headers if origin is allowed
+  // For other requests, set CORS headers
   const response = NextResponse.next();
-  if (isAllowedOrigin || process.env.NODE_ENV !== "production") {
-    response.headers.set("Access-Control-Allow-Origin", origin || "*");
-    response.headers.set("Access-Control-Allow-Credentials", "true");
+  if (isAllowedOrigin || isDevelopment) {
+    response.headers.set("Access-Control-Allow-Origin", isDevelopment ? "*" : (origin || "*"));
+    response.headers.set("Access-Control-Allow-Credentials", isDevelopment ? "false" : "true");
   }
   return response;
 }
